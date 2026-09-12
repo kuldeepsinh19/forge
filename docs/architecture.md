@@ -13,7 +13,8 @@ src/
   retrieval/   workspace probe, search, citation checking
   stages/      investigate · implement · review, their prompts and tools
   validate/    running the repository's own commands
-  git/         branch, diff, commit
+  git/         branch, diff, commit, push
+  github/      pull request delivery and issue intake
   cli/         the command line interface
 ```
 
@@ -33,9 +34,11 @@ This split is the load-bearing design decision.
 | Checking citations | Writing the code |
 | Running tests, lint, typecheck | Judging the diff |
 | Producing the diff | |
-| Branching and committing | |
+| Branching, committing, pushing | |
 | Deciding pass or fail | |
+| Writing the pull request body | |
 | Computing cost | |
+| Compacting history | |
 
 A model is used where judgement is required and nowhere else. The clearest case is
 validation: "did the test suite pass" has a correct answer available for the price of a
@@ -103,6 +106,39 @@ Two contradictions are caught in code rather than trusted to the model:
 - Approving while reporting blocking findings is downgraded to `request_changes`.
 - Approving while validation failed is treated as `request_changes`.
 
+### Deliver
+
+| | |
+|---|---|
+| **Runs when** | The review approved *and* `github.createPullRequest` is on |
+| **Does** | Pushes the branch, opens a pull request via the REST API |
+| **Body** | Assembled from `TaskState`, not written by a model |
+
+Every failure here is a warning rather than an exception. The work is already committed
+locally, so a missing token or a non-GitHub remote should downgrade the outcome, not
+discard it.
+
+## Bounding the conversation
+
+The agent loop compacts before sending, not after — trimming afterwards would already have
+paid for the oversized turn.
+
+When the estimated conversation exceeds `limits.historyBudgetTokens`, the *content* of the
+oldest tool results is replaced with a short placeholder. The blocks themselves stay,
+because Anthropic requires every `tool_use` to be answered by a matching `tool_result`, so
+removing them outright would make the request invalid. The task message and the most
+recent turns are never touched.
+
+Compaction breaks the cached prefix from that point on, so it is deliberately chunky: it
+frees down to roughly half the budget rather than trimming to fit exactly, to avoid paying
+that penalty every turn afterwards.
+
+## The spend cap
+
+`limits.maxCostUsd` is checked before every model call against telemetry that has already
+been written, so it is a real ceiling rather than an estimate. The call in flight when the
+cap is reached still completes, so actual spend can exceed it by one call. Zero disables it.
+
 ## State
 
 `TaskState` in `src/core/types.ts` is the single carrier. Every field beyond `task`,
@@ -169,6 +205,13 @@ prompt volume is `inputTokens + cacheCreationInputTokens + cacheReadInputTokens`
 in a well-cached agent and, perversely, makes a badly-cached system look leaner.
 
 So Forge reports `contextVolume`, `cacheHitRatio` and `prefixStable` per stage.
+
+Two cache breakpoints are set per request: one on the system prompt, and one on the last
+block of the conversation. The second matters more. System and tools together come to
+roughly 900 tokens, below Anthropic's 1024-token minimum, so that breakpoint alone would
+never create a cache entry — and the growing tool-result history, which is where tokens
+actually accumulate within a stage, would be re-billed in full every turn. A breakpoint at
+the end of the conversation caches everything before it cumulatively.
 `prefixStable` is false when a stage rendered more than one distinct system prompt across
 its turns — a bug that is otherwise invisible until it shows up on a bill.
 

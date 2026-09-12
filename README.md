@@ -112,6 +112,13 @@ tokens, cache reads and writes separately, resolved model, stage, latency and pr
                        │
                        ▼
                     commit
+                       │
+                       ▼
+              ┌──────────────────┐   push the branch, open a pull request
+              │     Deliver      │   whose body is built from run state.
+              └────────┬─────────┘   Opt-in, and only on approval.
+                       ▼
+                 GitHub pull request
 ```
 
 The stage sequence is a `for` loop in [`src/core/pipeline.ts`](src/core/pipeline.ts), not
@@ -120,9 +127,18 @@ model to decide it.
 
 ## Quick start
 
+Forge is not on npm yet, so install it from source:
+
 ```bash
-npm install -g forge-agent
+git clone https://github.com/kuldeepsinh19/forge.git
+cd forge && npm install && npm run build && npm link
 export ANTHROPIC_API_KEY=sk-...
+```
+
+Or run it without installing:
+
+```bash
+npx github:kuldeepsinh19/forge inspect
 ```
 
 See what Forge detects about your repository. This calls no model and costs nothing:
@@ -167,46 +183,67 @@ Forge requires a clean working tree, creates its own branch, and never commits t
 ▸ Investigating
     · search_code
     · read_file
-    · search_history
-  Investigation complete: 3 grounded claim(s), 4 acceptance criteria
+  Investigation complete: 1 grounded claim(s), 2 acceptance criteria
 
 ▸ Implementing
     · read_file
     · write_file
-  Implementation touched 2 file(s)
+  Implementation touched 1 file(s)
 
 ▸ Validating
-  typecheck: pnpm run typecheck
-  typecheck passed
-  test: pnpm run test
+  test: npm run test
   test passed
 
 ▸ Reviewing
-    · read_file
-  Review: approve (4/4 criteria passed)
+  Review: approve (2/2 criteria passed)
+  Committed 3df0339d0450
+
+▸ Delivering
+  Pushed forge/add-subtracts-instead-of-adding-da8ae4d0 to origin
+  Opened draft pull request #2
 
 ──────────────────────────────────────────────────────────────
 
   Status      approved
-  Branch      forge/users-can-submit-the-checkout-form-a1b2c3d4
-  Root cause  The submit handler is not disabled between click and
-              response, so a second click re-enters createOrder.
-  Evidence    3 grounded claim(s), 100% of citations resolved
-  Changed     src/checkout/SubmitButton.tsx, src/checkout/useOrder.ts
-  Validation  typecheck: pass  test: pass
-  Review      approve — 4/4 criteria
+  Branch      forge/add-subtracts-instead-of-adding-da8ae4d0
+  Root cause  The operator in add() is '-' where it should be '+'.
+  Evidence    1 grounded claim(s), 100% of citations resolved
+  Changed     src/calc.js
+  Validation  test: pass
+  Review      approve — 2/2 criteria
+  Pull req    #2 https://github.com/owner/repo/pull/2
 
   stage         reqs   ctx vol    cached    cost     prefix
   ─────────────────────────────────────────────────────────
-  investigate      7     84,120     71%    $0.0412   stable
-  implement        5    112,300     78%    $0.1901   stable
-  review           3     46,880     64%    $0.0233   stable
-  ─────────────────────────────────────────────────────────
-  total           15    243,300     73%    $0.2546
+  investigate      -          -        -          -   stable
+  implement        -          -        -          -   stable
+  review           -          -        -          -   stable
 ```
 
-> The figures above are illustrative of the output format. They are not a benchmark
-> result. See [Evaluation](#evaluation).
+> The pipeline output above is from a real run. The telemetry columns are left blank
+> deliberately: no token or cost figures are published until they are measured. See
+> [Evaluation](#evaluation).
+
+## Delivering a pull request
+
+By default Forge stops at a local commit on its own branch. Add `--pr` (or set
+`github.createPullRequest`) to push the branch and open a pull request once review
+approves:
+
+```bash
+forge run --pr "Users can submit the checkout form twice on a slow network"
+forge run --issue 42 --pr          # take the task from a GitHub issue, and close it
+```
+
+The pull request body is assembled from the run's own state — problem statement, root
+cause with verified citations, per-file changes, the validation table, the reviewer's
+per-criterion verdict, and any residual risks. None of it is generated prose, so the
+description cannot claim something the pipeline did not do.
+
+A pull request is opened **only on approval**. A rejected or failed run leaves the branch
+local. Authentication uses `GITHUB_TOKEN`, falling back to `gh auth token`. If there is
+no token, or the remote is not GitHub, the run warns and keeps the commit rather than
+failing.
 
 ## Configuration
 
@@ -223,11 +260,18 @@ when a key is absent.
   "limits": {
     "maxTurnsPerStage": 30,
     "maxRevisions": 2,
-    "validationTimeoutMs": 600000
+    "validationTimeoutMs": 600000,
+    "historyBudgetTokens": 60000,
+    "maxCostUsd": 0
   },
   "git": {
     "branchPrefix": "forge",
     "autoCommit": true
+  },
+  "github": {
+    "createPullRequest": false,
+    "draft": true,
+    "remote": "origin"
   },
   "validation": {
     "test": null,
@@ -306,11 +350,12 @@ What Forge already measures on every run, written to `.forge/runs/<timestamp>/`:
 ## Roadmap
 
 **Working today** — the three-stage pipeline, deterministic retrieval and validation,
-citation checking, bounded revision cycles, per-request telemetry, the Anthropic provider,
-and the `run` / `init` / `inspect` commands.
+citation checking, bounded revision cycles, history compaction, an enforced spend cap,
+per-request telemetry with prompt caching, GitHub issue intake, pull request delivery, the
+Anthropic provider, and the `run` / `init` / `inspect` commands.
 
-**Near term** — pull request creation, an evaluation harness against a public benchmark,
-GitHub issue intake, and a second provider to make the seam honest.
+**Near term** — an evaluation harness against a public benchmark, published cost figures,
+a second provider to make the seam honest, and npm distribution.
 
 **Possible later** — richer retrieval such as symbol-level indexing, additional code hosts,
 task sources such as Linear or Jira, and configurable human approval gates.

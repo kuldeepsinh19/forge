@@ -6,35 +6,74 @@
   "type": "object",
   "additionalProperties": false,
   "properties": {
-    "$schema": { "type": "string" },
+    "$schema": {
+      "type": "string"
+    },
     "models": {
       "type": "object",
       "description": "Model id per stage. Review defaults to a different model from implement, so the reviewer does not share the implementer's blind spots.",
       "additionalProperties": false,
       "properties": {
-        "investigate": { "type": "string", "default": "claude-sonnet-5" },
-        "implement": { "type": "string", "default": "claude-opus-5" },
-        "review": { "type": "string", "default": "claude-sonnet-5" }
+        "investigate": {
+          "type": "string",
+          "default": "claude-sonnet-5"
+        },
+        "implement": {
+          "type": "string",
+          "default": "claude-opus-5"
+        },
+        "review": {
+          "type": "string",
+          "default": "claude-sonnet-5"
+        }
       }
     },
     "limits": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "maxTurnsPerStage": { "type": "integer", "minimum": 1, "default": 30 },
-        "maxRevisions": { "type": "integer", "minimum": 0, "default": 2,
-          "description": "Implementation/review cycles after the first. 0 disables revision." },
-        "validationTimeoutMs": { "type": "integer", "minimum": 1, "default": 600000 },
-        "maxCostUsd": { "type": "number", "minimum": 0, "default": 0,
-          "description": "Abort above this estimated spend. 0 disables the cap." }
+        "maxTurnsPerStage": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 30
+        },
+        "maxRevisions": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 2,
+          "description": "Implementation/review cycles after the first. 0 disables revision."
+        },
+        "validationTimeoutMs": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 600000
+        },
+        "maxCostUsd": {
+          "type": "number",
+          "minimum": 0,
+          "default": 0,
+          "description": "Abort the run once recorded spend reaches this. 0 disables the cap. Checked before every model call against telemetry already written."
+        },
+        "historyBudgetTokens": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 60000,
+          "description": "Approximate token ceiling for one stage's conversation. Older tool results are elided above it."
+        }
       }
     },
     "git": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "branchPrefix": { "type": "string", "default": "forge" },
-        "autoCommit": { "type": "boolean", "default": true }
+        "branchPrefix": {
+          "type": "string",
+          "default": "forge"
+        },
+        "autoCommit": {
+          "type": "boolean",
+          "default": true
+        }
       }
     },
     "validation": {
@@ -42,10 +81,56 @@
       "description": "Override command discovery. null means use whatever the repository declares.",
       "additionalProperties": false,
       "properties": {
-        "test": { "type": ["string", "null"], "default": null },
-        "lint": { "type": ["string", "null"], "default": null },
-        "typecheck": { "type": ["string", "null"], "default": null },
-        "build": { "type": ["string", "null"], "default": null }
+        "test": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "lint": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "typecheck": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "build": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      }
+    },
+    "github": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Pull request delivery. Off by default: opening a pull request is outward-facing.",
+      "properties": {
+        "createPullRequest": {
+          "type": "boolean",
+          "default": false,
+          "description": "Push the branch and open a pull request once review approves."
+        },
+        "draft": {
+          "type": "boolean",
+          "default": true,
+          "description": "Open it as a draft."
+        },
+        "remote": {
+          "type": "string",
+          "default": "origin",
+          "description": "Remote to push to and derive the repository slug from."
+        }
       }
     }
   }

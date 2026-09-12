@@ -6,6 +6,7 @@ import { join, resolve } from "node:path";
 import { CONFIG_FILENAME, loadConfig, starterConfig } from "../core/config.js";
 import { run, type PipelineEvent } from "../core/pipeline.js";
 import type { Task } from "../core/types.js";
+import { fetchIssue, resolveRepoSlug, resolveToken } from "../github/pr.js";
 import { probeWorkspace } from "../retrieval/workspace.js";
 import { formatSummary } from "../telemetry/recorder.js";
 import { formatValidation } from "../validate/runner.js";
@@ -28,17 +29,23 @@ Options for \`run\`:
   --repo <path>       Repository to work in (default: current directory)
   --dry-run           Investigate only; write nothing
   --task-file <path>  Read the task description from a file instead of the argument
+  --issue <number>    Take the task from a GitHub issue on this repository's origin
+  --pr                Push the branch and open a pull request once review approves
+  --no-pr             Never open a pull request, overriding the config
+  --max-cost <usd>    Abort the run once recorded spend reaches this
   --run-dir <path>    Where to write telemetry (default: .forge/runs/<timestamp>)
   --no-telemetry      Do not write a run directory
   --json              Emit machine-readable JSON on stdout
   --quiet             Suppress progress output
 
 Environment:
+  GITHUB_TOKEN        Needed for --issue and --pr. Falls back to gh auth token.
   ANTHROPIC_API_KEY   Required for \`run\`.
 
 Examples:
   forge run "Users can submit the checkout form twice on a slow network"
   forge run --dry-run --task-file bug.md
+  forge run --issue 42 --pr
   forge inspect
 `;
 
@@ -56,6 +63,10 @@ function parse(argv: string[]): Cli {
       repo: { type: "string" },
       "dry-run": { type: "boolean", default: false },
       "task-file": { type: "string" },
+      issue: { type: "string" },
+      pr: { type: "boolean" },
+      "no-pr": { type: "boolean" },
+      "max-cost": { type: "string" },
       "run-dir": { type: "string" },
       "no-telemetry": { type: "boolean", default: false },
       json: { type: "boolean", default: false },
@@ -151,22 +162,6 @@ async function commandRun(cli: Cli, root: string): Promise<number> {
     return 2;
   }
 
-  const taskFile = cli.values["task-file"];
-  let body: string;
-  if (typeof taskFile === "string") {
-    if (!existsSync(taskFile)) {
-      process.stderr.write(`Task file not found: ${taskFile}\n`);
-      return 2;
-    }
-    body = readFileSync(taskFile, "utf8").trim();
-  } else {
-    body = cli.positionals.join(" ").trim();
-  }
-  if (body === "") {
-    process.stderr.write(`No task given.\n\n${USAGE}`);
-    return 2;
-  }
-
   let config;
   try {
     config = loadConfig(root);
@@ -175,12 +170,82 @@ async function commandRun(cli: Cli, root: string): Promise<number> {
     return 2;
   }
 
-  const task: Task = {
-    id: randomUUID(),
-    title: firstLine(body),
-    body,
-    source: typeof taskFile === "string" ? "file" : "cli",
-  };
+  // Flags override the config file, so a one-off run does not need it edited.
+  if (cli.values["pr"] === true) config.github.createPullRequest = true;
+  if (cli.values["no-pr"] === true) config.github.createPullRequest = false;
+  const maxCost = cli.values["max-cost"];
+  if (typeof maxCost === "string") {
+    const parsed = Number(maxCost);
+    if (!Number.isFinite(parsed) || parsed < 0) {
+      process.stderr.write(`--max-cost must be a non-negative number, got "${maxCost}".\n`);
+      return 2;
+    }
+    config.limits.maxCostUsd = parsed;
+  }
+
+  const taskFile = cli.values["task-file"];
+  const issueArg = cli.values["issue"];
+  let task: Task;
+
+  if (typeof issueArg === "string") {
+    const issueNumber = Number(issueArg);
+    if (!Number.isInteger(issueNumber) || issueNumber <= 0) {
+      process.stderr.write(`--issue must be a positive integer, got "${issueArg}".\n`);
+      return 2;
+    }
+    const slug = resolveRepoSlug(root, config.github.remote);
+    if (slug === null) {
+      process.stderr.write(
+        `Remote "${config.github.remote}" is not a GitHub repository, so --issue cannot be used.\n`,
+      );
+      return 2;
+    }
+    const token = resolveToken();
+    if (token === null) {
+      process.stderr.write("No GitHub token. Set GITHUB_TOKEN or run `gh auth login`.\n");
+      return 2;
+    }
+    try {
+      const issue = await fetchIssue(slug, token, issueNumber);
+      task = {
+        id: randomUUID(),
+        title: issue.title,
+        // The issue body verbatim. It is untrusted content, and the stages treat it so.
+        body: issue.body.trim() === "" ? issue.title : issue.body,
+        source: "github-issue",
+        sourceRef: String(issueNumber),
+      };
+      if (!quietFor(cli)) {
+        process.stderr.write(
+          `  Task from ${slug.owner}/${slug.repo}#${issueNumber}: ${issue.title}\n`,
+        );
+      }
+    } catch (error) {
+      process.stderr.write(`${(error as Error).message}\n`);
+      return 2;
+    }
+  } else {
+    let body: string;
+    if (typeof taskFile === "string") {
+      if (!existsSync(taskFile)) {
+        process.stderr.write(`Task file not found: ${taskFile}\n`);
+        return 2;
+      }
+      body = readFileSync(taskFile, "utf8").trim();
+    } else {
+      body = cli.positionals.join(" ").trim();
+    }
+    if (body === "") {
+      process.stderr.write(`No task given.\n\n${USAGE}`);
+      return 2;
+    }
+    task = {
+      id: randomUUID(),
+      title: firstLine(body),
+      body,
+      source: typeof taskFile === "string" ? "file" : "cli",
+    };
+  }
 
   const quiet = cli.values["quiet"] === true || cli.values["json"] === true;
   const runDir =
@@ -243,6 +308,9 @@ function renderReport(result: Awaited<ReturnType<typeof run>>): string {
     lines.push(`  Changed     ${state.implementation.changes.map((c) => c.path).join(", ")}`);
   }
   lines.push(`  Validation  ${formatValidation(state.validations)}`);
+  if (result.pullRequest) {
+    lines.push(`  Pull req    #${result.pullRequest.number} ${result.pullRequest.url}`);
+  }
 
   if (state.review) {
     const passed = state.review.criteriaResults.filter((c) => c.pass).length;
@@ -261,6 +329,11 @@ function renderReport(result: Awaited<ReturnType<typeof run>>): string {
   if (result.runDir) lines.push("", `  Telemetry written to ${result.runDir}`);
   lines.push("");
   return lines.join("\n");
+}
+
+/** Whether progress output is suppressed. Needed before the main `quiet` is computed. */
+function quietFor(cli: Cli): boolean {
+  return cli.values["quiet"] === true || cli.values["json"] === true;
 }
 
 function firstLine(text: string): string {

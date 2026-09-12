@@ -93,7 +93,18 @@ Prompt caching is priced roughly an order of magnitude below base input on a rea
 makes cache hit ratio, not prompt size, the dominant lever on cost for an agent that runs
 many turns.
 
-Caching only helps if the prefix is byte-identical between turns. So:
+Caching only helps if two things hold: the prefix must be byte-identical between turns,
+and the cached span must clear the provider's minimum (1024 tokens on most Anthropic
+models, 2048 on Haiku).
+
+The second is easy to miss. Forge's system prompt and tool schemas come to roughly 900
+tokens — under the minimum — so marking only that prefix produces no caching at all. The
+breakpoint that does the work sits on the **last block of the conversation**, which caches
+the system prompt, the tools and every prior turn cumulatively. From the second turn
+onward that easily clears the threshold, and the growing tool-result history is read back
+at roughly a tenth of base input price instead of being re-billed in full.
+
+For the byte-identical half:
 
 - the system prompt is rendered **once** per stage and passed unchanged every turn
 - the workspace profile is frozen at probe time, precisely so it cannot drift into the prefix

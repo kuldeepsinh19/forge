@@ -1,6 +1,6 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { relative, sep } from "node:path";
+import { sep } from "node:path";
 import { resolveInsideRoot } from "./evidence.js";
 import { git } from "./workspace.js";
 
@@ -204,16 +204,6 @@ export function recentlyChangedFiles(root: string, limit = 20): string[] {
     if (seen.size >= limit) break;
   }
   return [...seen];
-}
-
-/** The unified diff of the working tree against a base ref. */
-export function diffAgainst(root: string, baseRef: string): string {
-  return git(root, ["diff", baseRef, "--", ".", ":!*.lock", ":!*-lock.json"]) ?? "";
-}
-
-/** Repo-relative POSIX path for an absolute path inside the root. */
-export function toRepoPath(root: string, absolute: string): string {
-  return relative(root, absolute).split(sep).join("/");
 }
 
 function truncate(text: string, limit = MAX_LINE_CHARS): string {

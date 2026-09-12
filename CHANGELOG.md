@@ -8,6 +8,45 @@ major version is 0, the public API may change in a minor release.
 
 ## [Unreleased]
 
+### Added
+
+- **Pull request delivery.** On approval, Forge pushes the branch and opens a pull request
+  whose body is assembled from run state: problem statement, root cause with verified
+  citations, per-file changes, the validation table, the reviewer's per-criterion verdict,
+  and residual risks. Opt-in via `--pr` or `github.createPullRequest`. Auth is
+  `GITHUB_TOKEN`, falling back to `gh auth token`.
+- **GitHub issue intake.** `forge run --issue 42` takes the task from an issue and adds
+  `Closes #42` to the pull request.
+- **History compaction.** The oldest tool results are elided once a stage's conversation
+  exceeds `limits.historyBudgetTokens` (default 60,000). Block structure is preserved so
+  `tool_use`/`tool_result` pairing stays valid; the task and recent turns are untouched.
+- **Enforced spend cap.** `limits.maxCostUsd` was previously declared but never checked.
+  It is now evaluated before every model call against telemetry already written.
+  `--max-cost` sets it per run.
+
+### Fixed
+
+- **Prompt caching never engaged.** Only the system prompt and tools were marked
+  cacheable, together around 900 tokens — below Anthropic's 1024-token minimum — so no
+  cache entry was ever created, and the growing tool-result history was re-billed in full
+  every turn. A cache breakpoint is now also placed on the last block of the conversation,
+  which caches the whole prefix cumulatively.
+- **Forge's own telemetry was committed into pull requests.** `.forge/` is now excluded
+  from commits and from the diff the reviewer reads. Found by an end-to-end run against a
+  real repository.
+
+### Removed
+
+- Six exported functions nothing called: `checkoutBranch`, `diffBetween`, `changedFiles`,
+  `resetHard`, `toRepoPath`, `diffAgainst`.
+
+### Changed
+
+- Install instructions now describe building from source, since the package is not
+  published to npm. The README's sample run no longer shows token or cost figures that
+  were never measured.
+
+
 ## [0.1.0]
 
 First release. The pipeline runs end to end; it has not yet been evaluated at scale.

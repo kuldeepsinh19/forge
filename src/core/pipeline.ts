@@ -14,7 +14,16 @@ import {
   diffWorkingTree,
   isDirty,
   isRepository,
+  pushBranch,
 } from "../git/workspace.js";
+import {
+  createPullRequest,
+  PullRequestError,
+  renderPullRequestBody,
+  renderPullRequestTitle,
+  resolveRepoSlug,
+  resolveToken,
+} from "../github/pr.js";
 import { implement } from "../stages/implement.js";
 import { investigate } from "../stages/investigate.js";
 import { review } from "../stages/review.js";
@@ -63,6 +72,8 @@ export interface RunOptions {
 
 export interface RunResult {
   state: TaskState;
+  /** The pull request, when one was opened. */
+  pullRequest?: { number: number; url: string };
   telemetry: RunSummary;
   /** Fraction of investigation claims whose citations resolved. */
   citationAccuracy: number;
@@ -91,6 +102,20 @@ export async function run(options: RunOptions): Promise<RunResult> {
   // Recording is applied at the seam, not inside each provider, so every call is
   // accounted for regardless of which provider serves it.
   const makeProvider = (model: string): ModelProvider => withRecording(build(model), recorder);
+
+  // The spend cap, enforced against telemetry already written rather than an estimate.
+  // Returns a reason string when the cap is reached, which aborts the stage.
+  const cap = options.config.limits.maxCostUsd;
+  const checkBudget = (): string | null => {
+    if (cap <= 0) return null;
+    const spent = recorder.summarize().totalCostUsd;
+    return spent >= cap ? `Spend cap reached: ${spent.toFixed(4)} of ${cap.toFixed(2)}.` : null;
+  };
+  const budget = {
+    historyBudgetTokens: options.config.limits.historyBudgetTokens,
+    checkBudget,
+    onCompact: (freed: number) => emit("info", `Compacted history, freed ~${freed} tokens`),
+  };
 
   // Probed once, then frozen: it is rendered into every prompt's cached prefix.
   emit("info", "Probing repository…");
@@ -128,6 +153,7 @@ export async function run(options: RunOptions): Promise<RunResult> {
     repository,
     taskRunId,
     maxTurns: options.config.limits.maxTurnsPerStage,
+    ...budget,
     onToolCall: (name) => emit("tool", name),
   });
   state.warnings.push(...investigation.warnings);
@@ -172,6 +198,7 @@ export async function run(options: RunOptions): Promise<RunResult> {
       investigation: state.investigation,
       taskRunId,
       maxTurns: options.config.limits.maxTurnsPerStage,
+      ...budget,
       ...(state.review ? { priorReview: state.review } : {}),
       onToolCall: (name) => emit("tool", name),
     });
@@ -214,6 +241,7 @@ export async function run(options: RunOptions): Promise<RunResult> {
       validations: state.validations,
       taskRunId,
       maxTurns: options.config.limits.maxTurnsPerStage,
+      ...budget,
       onToolCall: (name) => emit("tool", name),
     });
     state.warnings.push(...reviewed.warnings);
@@ -256,7 +284,90 @@ export async function run(options: RunOptions): Promise<RunResult> {
     }
   }
 
-  return finish(state, recorder, investigation.citationAccuracy, options.runDir);
+  // ── Deliver: push the branch and open a pull request ────────────────────────
+  //
+  // Only on approval. A rejected or failed run leaves the branch local, so nothing
+  // outward-facing happens on work that did not pass its own review.
+  let pullRequest: RunResult["pullRequest"];
+  if (state.status === "approved" && options.config.github.createPullRequest) {
+    pullRequest = await deliver(state, options, investigation.citationAccuracy, emit);
+  }
+
+  return finish(state, recorder, investigation.citationAccuracy, options.runDir, pullRequest);
+}
+
+/**
+ * Push the branch and open the pull request.
+ *
+ * Every failure here is a warning rather than an exception: the work is already committed
+ * locally and is not lost, so a missing token or a non-GitHub remote should downgrade the
+ * outcome, not discard it.
+ */
+async function deliver(
+  state: TaskState,
+  options: RunOptions,
+  citationAccuracy: number,
+  emit: (type: PipelineEvent["type"], message: string) => void,
+): Promise<RunResult["pullRequest"]> {
+  const { remote, draft } = options.config.github;
+
+  if (!state.branch) {
+    state.warnings.push("No branch to deliver.");
+    return undefined;
+  }
+
+  const slug = resolveRepoSlug(options.root, remote);
+  if (slug === null) {
+    const warning = `Remote "${remote}" is not a GitHub repository; skipping the pull request. The branch is committed locally.`;
+    state.warnings.push(warning);
+    emit("warning", warning);
+    return undefined;
+  }
+
+  const token = resolveToken();
+  if (token === null) {
+    const warning =
+      "No GitHub token found; skipping the pull request. Set GITHUB_TOKEN or run `gh auth login`. The branch is committed locally.";
+    state.warnings.push(warning);
+    emit("warning", warning);
+    return undefined;
+  }
+
+  emit("stage-start", "Delivering");
+  try {
+    pushBranch(options.root, state.branch, remote);
+    emit("info", `Pushed ${state.branch} to ${remote}`);
+  } catch (error) {
+    const warning = `Could not push the branch: ${(error as Error).message}`;
+    state.warnings.push(warning);
+    emit("warning", warning);
+    return undefined;
+  }
+
+  try {
+    const created = await createPullRequest({
+      slug,
+      token,
+      head: state.branch,
+      base: state.repository.baseBranch,
+      title: renderPullRequestTitle(state),
+      body: renderPullRequestBody(state, {
+        citationAccuracy,
+        ...(state.task.source === "github-issue" && state.task.sourceRef
+          ? { closesIssue: Number(state.task.sourceRef) }
+          : {}),
+      }),
+      draft,
+    });
+    emit("stage-end", `Opened ${draft ? "draft " : ""}pull request #${created.number}`);
+    return created;
+  } catch (error) {
+    const hint = error instanceof PullRequestError && error.hint ? ` ${error.hint}` : "";
+    const warning = `Branch pushed, but opening the pull request failed: ${(error as Error).message}${hint}`;
+    state.warnings.push(warning);
+    emit("warning", warning);
+    return undefined;
+  }
 }
 
 function finish(
@@ -264,13 +375,20 @@ function finish(
   recorder: TelemetryRecorder,
   citationAccuracy: number,
   runDir: string | undefined,
+  pullRequest?: RunResult["pullRequest"],
 ): RunResult {
   if (runDir) {
     mkdirSync(runDir, { recursive: true });
     recorder.writeSummary(runDir);
     writeFileSync(join(runDir, "state.json"), JSON.stringify(state, null, 2), "utf8");
   }
-  return { state, telemetry: recorder.summarize(), citationAccuracy, runDir };
+  return {
+    state,
+    telemetry: recorder.summarize(),
+    citationAccuracy,
+    runDir,
+    ...(pullRequest ? { pullRequest } : {}),
+  };
 }
 
 /** Commit message built from the pipeline's own outputs, never from free-form model text. */

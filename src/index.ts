@@ -43,6 +43,19 @@ export {
 } from "./retrieval/evidence.js";
 export type { EvidenceValidation } from "./retrieval/evidence.js";
 
+/** Pull request delivery. Deterministic: the body is built from run state. */
+export {
+  createPullRequest,
+  fetchIssue,
+  parseRemote,
+  renderPullRequestBody,
+  renderPullRequestTitle,
+  resolveRepoSlug,
+  resolveToken,
+  PullRequestError,
+} from "./github/pr.js";
+export type { PullRequest, RepoSlug } from "./github/pr.js";
+
 /** Deterministic validation. */
 export { runValidation, allPassed, formatValidation } from "./validate/runner.js";
 
@@ -56,6 +69,11 @@ export {
 } from "./telemetry/cost.js";
 export type { ModelPrice, PriceTable } from "./telemetry/cost.js";
 export { TelemetryRecorder, formatSummary } from "./telemetry/recorder.js";
+export {
+  compactHistory,
+  estimateMessageTokens,
+  DEFAULT_HISTORY_BUDGET_TOKENS,
+} from "./stages/agent-loop.js";
 export type { RunSummary, StageSummary } from "./telemetry/recorder.js";
 
 /** The provider seam. Implement this to add a vendor. */

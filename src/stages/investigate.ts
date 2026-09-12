@@ -127,6 +127,12 @@ export interface InvestigateOptions {
   repository: RepositoryContext;
   taskRunId: string;
   maxTurns: number;
+  /** Approximate token ceiling for this stage's conversation. */
+  historyBudgetTokens?: number;
+  /** Checked before every model call; a string aborts the stage. */
+  checkBudget?: () => string | null;
+  /** Notified when history was compacted. */
+  onCompact?: (freedTokens: number) => void;
   onToolCall?: (name: string) => void;
 }
 
@@ -156,6 +162,11 @@ export async function investigate(options: InvestigateOptions): Promise<Investig
       "Submit your final investigation. Call this exactly once, when you can support the " +
       "root cause with citations you have actually read.",
     submitInputSchema: SUBMIT_SCHEMA,
+    ...(options.historyBudgetTokens !== undefined
+      ? { historyBudgetTokens: options.historyBudgetTokens }
+      : {}),
+    ...(options.checkBudget ? { checkBudget: options.checkBudget } : {}),
+    ...(options.onCompact ? { onCompact: options.onCompact } : {}),
     ...(options.onToolCall ? { onToolCall: options.onToolCall } : {}),
   });
 

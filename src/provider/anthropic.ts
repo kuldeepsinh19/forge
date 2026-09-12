@@ -58,6 +58,25 @@ export class AnthropicProvider implements ModelProvider {
         : {}),
     }));
 
+    const messages = request.messages.map((message) => ({
+      role: message.role,
+      content:
+        typeof message.content === "string"
+          ? message.content
+          : (message.content.map(toAnthropicBlock) as Anthropic.ContentBlockParam[]),
+    }));
+
+    // Cache the conversation as well as the prefix.
+    //
+    // Marking only system and tools is not enough. Those come to roughly 900 tokens,
+    // which is below Anthropic's 1024-token minimum, so that breakpoint alone never
+    // creates a cache entry — and, more importantly, the growing tool-result history is
+    // where the tokens actually accumulate within a stage. A breakpoint on the last block
+    // of the conversation caches everything before it (system, tools and all prior
+    // turns), so each turn re-reads the previous turn's context at cache-read price
+    // instead of paying full input for it again.
+    if (cache) markLastBlockCacheable(messages);
+
     const response = await this.client.messages.create({
       model: this.model,
       max_tokens: request.maxTokens,
@@ -70,13 +89,7 @@ export class AnthropicProvider implements ModelProvider {
         },
       ],
       ...(tools.length > 0 ? { tools } : {}),
-      messages: request.messages.map((message) => ({
-        role: message.role,
-        content:
-          typeof message.content === "string"
-            ? message.content
-            : (message.content.map(toAnthropicBlock) as Anthropic.ContentBlockParam[]),
-      })),
+      messages,
     });
 
     const usage: Usage = {
@@ -110,6 +123,41 @@ export class AnthropicProvider implements ModelProvider {
       costUsd: 0,
     };
   }
+}
+
+/**
+ * Put a cache breakpoint on the final content block of the conversation.
+ *
+ * Anthropic caches by prefix, so a breakpoint here covers the system prompt, the tool
+ * schemas and every prior turn. On the next turn that whole span is a cache read.
+ *
+ * A string-content message is promoted to a block array first, because `cache_control`
+ * attaches to a block rather than to a message. If the conversation is empty there is
+ * nothing to mark and the system breakpoint is the only one, which is correct for the
+ * first turn: there is no history to reuse yet.
+ */
+function markLastBlockCacheable(
+  messages: Array<{ role: "user" | "assistant"; content: string | Anthropic.ContentBlockParam[] }>,
+): void {
+  const last = messages[messages.length - 1];
+  if (!last) return;
+
+  if (typeof last.content === "string") {
+    last.content = [
+      {
+        type: "text",
+        text: last.content,
+        cache_control: { type: "ephemeral" },
+      } as Anthropic.ContentBlockParam,
+    ];
+    return;
+  }
+
+  const block = last.content[last.content.length - 1];
+  if (!block) return;
+  // Every block type Anthropic accepts supports cache_control; the SDK's union types
+  // simply do not express that uniformly.
+  (block as { cache_control?: { type: "ephemeral" } }).cache_control = { type: "ephemeral" };
 }
 
 function toAnthropicBlock(block: ContentBlock): Anthropic.ContentBlockParam {

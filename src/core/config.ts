@@ -27,8 +27,16 @@ const limitsSchema = z.object({
   maxRevisions: z.number().int().min(0),
   /** Per validation command, in milliseconds. */
   validationTimeoutMs: z.number().int().positive(),
-  /** Abort the run if estimated spend exceeds this. 0 disables the cap. */
+  /**
+   * Abort the run once recorded spend reaches this. 0 disables the cap.
+   *
+   * Checked before every model call against telemetry that has already been written, so
+   * it is a real ceiling rather than an estimate. The call in flight when the cap is
+   * reached still completes, so actual spend can exceed it by one call.
+   */
   maxCostUsd: z.number().min(0),
+  /** Approximate token ceiling for one stage's conversation before old results are elided. */
+  historyBudgetTokens: z.number().int().positive(),
 });
 
 export const configSchema = z.object({
@@ -38,6 +46,14 @@ export const configSchema = z.object({
     branchPrefix: z.string(),
     /** Commit automatically once validation passes. */
     autoCommit: z.boolean(),
+  }),
+  github: z.object({
+    /** Push the branch and open a pull request once review approves. */
+    createPullRequest: z.boolean(),
+    /** Open it as a draft. */
+    draft: z.boolean(),
+    /** Remote to push to and derive the repository slug from. */
+    remote: z.string(),
   }),
   validation: z.object({
     /** Override discovery. Null means "use what the repository declares". */
@@ -67,10 +83,18 @@ export const DEFAULT_CONFIG: ForgeConfig = {
     maxRevisions: 2,
     validationTimeoutMs: 600_000,
     maxCostUsd: 0,
+    historyBudgetTokens: 60_000,
   },
   git: {
     branchPrefix: "forge",
     autoCommit: true,
+  },
+  github: {
+    // Off by default: opening a pull request is an outward-facing action, so it is opt-in
+    // rather than something a first run does by surprise.
+    createPullRequest: false,
+    draft: true,
+    remote: "origin",
   },
   validation: {
     test: null,
@@ -137,7 +161,11 @@ export function starterConfig(): string {
       $schema:
         "https://raw.githubusercontent.com/kuldeepsinh19/forge/main/schema/forge.config.schema.json",
       models: DEFAULT_CONFIG.models,
-      limits: { maxRevisions: DEFAULT_CONFIG.limits.maxRevisions },
+      limits: {
+        maxRevisions: DEFAULT_CONFIG.limits.maxRevisions,
+        maxCostUsd: DEFAULT_CONFIG.limits.maxCostUsd,
+      },
+      github: DEFAULT_CONFIG.github,
       validation: {
         test: null,
         lint: null,

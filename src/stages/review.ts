@@ -100,6 +100,12 @@ export interface ReviewOptions {
   validations: ValidationResult[];
   taskRunId: string;
   maxTurns: number;
+  /** Approximate token ceiling for this stage's conversation. */
+  historyBudgetTokens?: number;
+  /** Checked before every model call; a string aborts the stage. */
+  checkBudget?: () => string | null;
+  /** Notified when history was compacted. */
+  onCompact?: (freedTokens: number) => void;
   onToolCall?: (name: string) => void;
 }
 
@@ -142,6 +148,11 @@ export async function review(options: ReviewOptions): Promise<ReviewResult> {
     submitToolDescription:
       "Submit your review. Call this once, after judging every acceptance criterion.",
     submitInputSchema: SUBMIT_SCHEMA,
+    ...(options.historyBudgetTokens !== undefined
+      ? { historyBudgetTokens: options.historyBudgetTokens }
+      : {}),
+    ...(options.checkBudget ? { checkBudget: options.checkBudget } : {}),
+    ...(options.onCompact ? { onCompact: options.onCompact } : {}),
     ...(options.onToolCall ? { onToolCall: options.onToolCall } : {}),
   });
 

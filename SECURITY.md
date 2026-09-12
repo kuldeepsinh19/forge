@@ -101,8 +101,13 @@ never written to disk, never included in a prompt, and never recorded in telemet
 Telemetry records token counts, model ids, stage names, latency, cost and content
 **hashes** — never prompt or response text.
 
-Forge does not require a GitHub token today. When pull request creation lands, it will
-need `repo` scope, and the same rule will apply: the token stays out of prompts.
+A GitHub token is needed only for `--issue` and `--pr`. It is read from `GITHUB_TOKEN`
+(or `gh auth token`), used for two REST calls, and never written to disk, logged, placed
+in a prompt, or passed into the repository's own commands. It needs `repo` scope on a
+classic token, or pull-request write on a fine-grained one.
+
+A pull request is opened only when the review stage approves, and it is a draft by
+default. Forge cannot merge: no merge call exists in the codebase.
 
 ## Reducing risk
 

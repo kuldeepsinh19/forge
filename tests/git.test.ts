@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -149,5 +149,38 @@ describe("diffWorkingTree", () => {
   it("is empty when nothing changed", () => {
     const base = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
     expect(diffWorkingTree(root, base).trim()).toBe("");
+  });
+});
+
+describe("Forge's own artifacts", () => {
+  it("keeps .forge out of the commit", () => {
+    // Telemetry is written inside the repository under test. Without an explicit
+    // exclusion `git add -A` sweeps it into the change, and it ends up in the pull
+    // request. Caught by a real end-to-end run, so pinned here.
+    createBranch(root, "forge/work");
+    mkdirSync(join(root, ".forge", "runs", "x"), { recursive: true });
+    writeFileSync(join(root, ".forge", "runs", "x", "requests.jsonl"), '{"a":1}\n', "utf8");
+    writeFileSync(join(root, "src.txt"), "real change", "utf8");
+
+    const sha = commitAll(root, "change");
+    expect(sha).not.toBeNull();
+
+    const committed = execFileSync("git", ["show", "--name-only", "--pretty=format:", "HEAD"], {
+      cwd: root,
+      encoding: "utf8",
+    });
+    expect(committed).toContain("src.txt");
+    expect(committed).not.toContain(".forge");
+  });
+
+  it("keeps .forge out of the diff the reviewer sees", () => {
+    const base = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
+    mkdirSync(join(root, ".forge", "runs", "y"), { recursive: true });
+    writeFileSync(join(root, ".forge", "runs", "y", "summary.json"), "{}", "utf8");
+    writeFileSync(join(root, "feature.ts"), "export const x = 1;\n", "utf8");
+
+    const diff = diffWorkingTree(root, base);
+    expect(diff).toContain("feature.ts");
+    expect(diff).not.toContain(".forge");
   });
 });

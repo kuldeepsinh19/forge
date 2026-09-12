@@ -11,6 +11,16 @@ import { execFileSync } from "node:child_process";
 
 const GIT_TIMEOUT_MS = 30_000;
 
+/**
+ * Paths kept out of every commit and diff.
+ *
+ * Forge writes telemetry into `.forge/` inside the repository it is working on. Without
+ * this exclusion `git add -A` sweeps those artifacts into the change, so a pull request
+ * carries the run's own logs alongside the fix — and the review stage pays to read them.
+ * Lockfiles are excluded from diffs for the same reason: volume with no signal.
+ */
+const EXCLUDE_PATHSPEC = [":!.forge", ":!*.lock", ":!*-lock.json", ":!*.lockb"];
+
 export class GitError extends Error {
   constructor(
     message: string,
@@ -111,12 +121,6 @@ export function createBranch(root: string, branch: string): void {
   git(root, ["checkout", "-b", branch]);
 }
 
-export function checkoutBranch(root: string, branch: string): void {
-  if (!SAFE_BRANCH.test(branch))
-    throw new GitError(`Unsafe branch name: ${branch}`, "checkoutBranch");
-  git(root, ["checkout", branch]);
-}
-
 /**
  * Stage everything and commit.
  *
@@ -125,34 +129,18 @@ export function checkoutBranch(root: string, branch: string): void {
  */
 export function commitAll(root: string, message: string): string | null {
   assertNotProtected(currentBranch(root));
-  git(root, ["add", "-A"]);
+  git(root, ["add", "-A", "--", ".", ...EXCLUDE_PATHSPEC]);
   if (git(root, ["diff", "--cached", "--name-only"]).length === 0) return null;
   // Message via stdin-free argument array: no shell, so no quoting hazard.
   git(root, ["commit", "-m", message, "--no-verify"]);
   return currentCommit(root);
 }
 
-/** Unified diff between two refs, excluding lockfiles. */
-export function diffBetween(root: string, from: string, to = "HEAD"): string {
-  return git(root, ["diff", `${from}..${to}`, "--", ".", ":!*.lock", ":!*-lock.json", ":!*.lockb"]);
-}
-
 /** Diff of the working tree against a ref, including untracked files. */
 export function diffWorkingTree(root: string, base: string): string {
-  git(root, ["add", "-AN"]); // intent-to-add so new files appear in the diff
-  return git(root, ["diff", base, "--", ".", ":!*.lock", ":!*-lock.json", ":!*.lockb"]);
-}
-
-/** Files changed between two refs. */
-export function changedFiles(root: string, from: string, to = "HEAD"): string[] {
-  const output = git(root, ["diff", "--name-only", `${from}..${to}`]);
-  return output.length === 0 ? [] : output.split("\n");
-}
-
-/** Discard all uncommitted changes. Used to reset after an abandoned run. */
-export function resetHard(root: string, ref = "HEAD"): void {
-  git(root, ["reset", "--hard", ref]);
-  git(root, ["clean", "-fd"]);
+  // Intent-to-add so new files appear in the diff, minus Forge's own artifacts.
+  git(root, ["add", "-AN", "--", ".", ...EXCLUDE_PATHSPEC]);
+  return git(root, ["diff", base, "--", ".", ...EXCLUDE_PATHSPEC]);
 }
 
 /** Push a branch to a remote. Refuses protected branches. */

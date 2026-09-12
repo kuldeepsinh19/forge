@@ -70,6 +70,12 @@ export interface ImplementOptions {
   maxTurns: number;
   /** Present on a revision run: the findings that must be addressed. */
   priorReview?: Review;
+  /** Approximate token ceiling for this stage's conversation. */
+  historyBudgetTokens?: number;
+  /** Checked before every model call; a string aborts the stage. */
+  checkBudget?: () => string | null;
+  /** Notified when history was compacted. */
+  onCompact?: (freedTokens: number) => void;
   onToolCall?: (name: string) => void;
 }
 
@@ -100,6 +106,11 @@ export async function implement(options: ImplementOptions): Promise<ImplementRes
     submitToolDescription:
       "Submit your implementation report. Call this once, after every file is written.",
     submitInputSchema: SUBMIT_SCHEMA,
+    ...(options.historyBudgetTokens !== undefined
+      ? { historyBudgetTokens: options.historyBudgetTokens }
+      : {}),
+    ...(options.checkBudget ? { checkBudget: options.checkBudget } : {}),
+    ...(options.onCompact ? { onCompact: options.onCompact } : {}),
     ...(options.onToolCall ? { onToolCall: options.onToolCall } : {}),
   });
 
