@@ -1,0 +1,12 @@
+# Normalize all text to LF in the repository and on checkout.
+# Without this, a Windows checkout produces CRLF and `prettier --check`
+# fails in CI while passing locally on Linux and macOS.
+* text=auto eol=lf
+
+# Binary files must never be normalized.
+*.png binary
+*.jpg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary

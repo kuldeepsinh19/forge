@@ -1,0 +1,52 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://raw.githubusercontent.com/kuldeepsinh19/forge/main/schema/forge.config.schema.json",
+  "title": "Forge configuration",
+  "description": "Configuration for the Forge CLI. Every key is optional; defaults apply when absent.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "type": "string" },
+    "models": {
+      "type": "object",
+      "description": "Model id per stage. Review defaults to a different model from implement, so the reviewer does not share the implementer's blind spots.",
+      "additionalProperties": false,
+      "properties": {
+        "investigate": { "type": "string", "default": "claude-sonnet-5" },
+        "implement": { "type": "string", "default": "claude-opus-5" },
+        "review": { "type": "string", "default": "claude-sonnet-5" }
+      }
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "maxTurnsPerStage": { "type": "integer", "minimum": 1, "default": 30 },
+        "maxRevisions": { "type": "integer", "minimum": 0, "default": 2,
+          "description": "Implementation/review cycles after the first. 0 disables revision." },
+        "validationTimeoutMs": { "type": "integer", "minimum": 1, "default": 600000 },
+        "maxCostUsd": { "type": "number", "minimum": 0, "default": 0,
+          "description": "Abort above this estimated spend. 0 disables the cap." }
+      }
+    },
+    "git": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "branchPrefix": { "type": "string", "default": "forge" },
+        "autoCommit": { "type": "boolean", "default": true }
+      }
+    },
+    "validation": {
+      "type": "object",
+      "description": "Override command discovery. null means use whatever the repository declares.",
+      "additionalProperties": false,
+      "properties": {
+        "test": { "type": ["string", "null"], "default": null },
+        "lint": { "type": ["string", "null"], "default": null },
+        "typecheck": { "type": ["string", "null"], "default": null },
+        "build": { "type": ["string", "null"], "default": null }
+      }
+    }
+  }
+}

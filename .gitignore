@@ -1,0 +1,16 @@
+node_modules/
+.research/
+.env
+.env.*
+!.env.example
+dist/
+*.log
+
+# Internal brief - never published
+Goal/
+.forge-private/
+
+.forge/
+
+# Internal research - development context, not published
+docs/research/

@@ -1,0 +1,31 @@
+name: Feature request
+description: Suggest a capability or a change in behaviour
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do that Forge makes hard or impossible?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you have in mind
+      description: Rough is fine. The problem matters more than the solution.
+    validations:
+      required: false
+  - type: dropdown
+    id: determinism
+    attributes:
+      label: Does this need a model?
+      description: >
+        Forge's guiding rule is that deterministic code should do anything it can do.
+        Worth considering before proposing a new reasoning stage.
+      options:
+        - "No — deterministic code could do this"
+        - "Yes — it genuinely needs judgement"
+        - "Not sure"
+    validations:
+      required: false
