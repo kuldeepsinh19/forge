@@ -20,7 +20,7 @@ execution.
 
 Most agent frameworks make the same trade. Give an agent less context and it hallucinates
 files that do not exist. Give every stage more context and cost grows with the square of
-the pipeline, because every particular stage re-receives what the last one already read.
+the pipeline, because every stage re-receives what the last one already read.
 
 Forge takes a third position: **context is curated, not accumulated.**
 
