@@ -141,6 +141,9 @@ Or run it without installing:
 npx github:kuldeepsinh19/forge inspect
 ```
 
+Working on Forge itself? `npm run dev -- inspect` runs the CLI straight from `src/` with tsx,
+no build needed.
+
 See what Forge detects about your repository. This calls no model and costs nothing:
 
 ```bash
