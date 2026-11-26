@@ -377,6 +377,12 @@ npm install
 npm test
 ```
 
+CI runs the same checks on every push; run them before opening a pull request:
+
+```bash
+npm run typecheck && npm run lint && npm run format:check && npm test && npm run build
+```
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
